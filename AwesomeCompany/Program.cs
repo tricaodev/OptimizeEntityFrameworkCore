@@ -1,15 +1,32 @@
 using AwesomeCompany;
 using AwesomeCompany.Entities;
+using AwesomeCompany.Options;
+using AwesomeCompany.Responses;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
-builder.Services.AddDbContext<DatabaseContext>(o =>
-    o.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"))
+builder.Services.ConfigureOptions<DatabaseOptionsSetup>();
+
+builder.Services.AddDbContext<DatabaseContext>((serviceProvider, optionsBuilder) =>
+    {
+        var configuration = serviceProvider.GetRequiredService<IOptions<DatabaseOptions>>().Value;
+        optionsBuilder.UseNpgsql(configuration.ConnectionString, sqlAction =>
+        {
+            //sqlAction.EnableRetryOnFailure(configuration.EnableRetryOnFailure);
+
+            sqlAction.CommandTimeout(configuration.CommandTimeout);
+        });
+
+        optionsBuilder.EnableDetailedErrors(configuration.EnableDetailedErrors);
+
+        optionsBuilder.EnableSensitiveDataLogging(configuration.EnableSensitiveDataLogging);
+    }
 );
 
 builder.Services.AddControllers();
@@ -107,6 +124,26 @@ app.MapPut("increase-salary-sql-dapper", async (int companyId, DatabaseContext c
 
     return Results.NoContent();
 
+});
+
+app.MapGet("company/{id}", async (int id, DatabaseContext context) =>
+{
+    var company = await context
+        .Set<Company>()
+        .FirstOrDefaultAsync(c => c.Id == id);
+
+    if (company is null)
+    {
+        return Results.NotFound($"The company with Id {id} was not found.");
+    }
+
+    var response = new CompanyResponse()
+    {
+        Id = id,
+        Name = company.Name
+    };
+
+    return Results.Ok(response);
 });
 
 app.Run();
